@@ -14,15 +14,32 @@ DEFAULT_CHUNK_SIZE = 800
 DEFAULT_CHUNK_OVERLAP = 150
 
 
+def get_line_range(text: str, start_index: int, chunk_text: str):
+    start_line = text[:start_index].count("\n") + 1
+    end_line = start_line + chunk_text.count("\n")
+    return start_line, end_line
+
+
 def chunk_documents(documents, chunk_size=DEFAULT_CHUNK_SIZE, chunk_overlap=DEFAULT_CHUNK_OVERLAP):
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
+        add_start_index=True,
     )
     chunks = splitter.split_documents(documents)
+    source_content = {
+        document.metadata.get("source", ""): document.page_content
+        for document in documents
+    }
 
     for index, chunk in enumerate(chunks):
+        source = chunk.metadata.get("source", "")
+        start_index = chunk.metadata.get("start_index", 0)
+        start_line, end_line = get_line_range(source_content.get(source, ""), start_index, chunk.page_content)
+        chunk.metadata["chunk"] = index
         chunk.metadata["chunk_index"] = index
+        chunk.metadata["start_line"] = start_line
+        chunk.metadata["end_line"] = end_line
 
     return chunks
 
@@ -36,8 +53,10 @@ def format_chunks(chunks, preview_chars=300):
     chunk_items = []
     for chunk in chunks:
         chunk_items.append({
-            "chunk_index": chunk.metadata.get("chunk_index"),
+            "chunk": chunk.metadata.get("chunk"),
             "source": chunk.metadata.get("source", ""),
+            "start_line": chunk.metadata.get("start_line"),
+            "end_line": chunk.metadata.get("end_line"),
             "characters": len(chunk.page_content),
             "content": chunk.page_content,
             "preview": chunk.page_content[:preview_chars],
@@ -59,6 +78,6 @@ if __name__ == "__main__":
     data = chunk_repo_data(repo_path)
     print(f"Total chunks: {data['total_chunks']}")
     for chunk in data["chunks"][:5]:
-        print(f"[{chunk['chunk_index']}] {chunk['source']} ({chunk['characters']} chars)")
+        print(f"[{chunk['chunk']}] {chunk['source']} lines {chunk['start_line']}-{chunk['end_line']}")
         print(chunk["preview"])
         print("---")

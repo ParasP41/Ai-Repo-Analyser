@@ -1,10 +1,14 @@
 import shutil
 import subprocess
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import HTTPException, status
 from pydantic import BaseModel, Field
+
+from src.models.repo_model import repositories
+from src.rag.vector_rag import save_repo_vectors
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -82,11 +86,14 @@ def update_repo(path):
     return {"message": "Repository updated successfully"}
 
 
-def clone_repository(payload: CloneRepoRequest, current_user: dict):
-    owner, repo_name, clone_url = get_github_repo(payload.github_url)
+def clone_to_temp(github_url: str):
+    owner, repo_name, clone_url = get_github_repo(github_url)
 
     TEMP_REPO_DIR.mkdir(parents=True, exist_ok=True)
     local_path = TEMP_REPO_DIR / f"{owner}__{repo_name}"
+
+    if local_path.exists():
+        delete_repo(local_path)
 
     result = subprocess.run(
         ["git", "clone", clone_url, str(local_path)],
@@ -101,10 +108,52 @@ def clone_repository(payload: CloneRepoRequest, current_user: dict):
             detail="Unable to clone repository",
         )
 
-    return {
-        "message": "Repository cloned successfully",
+    return repo_name, clone_url, local_path
+
+
+def index_repository(payload: CloneRepoRequest, current_user: dict):
+    repo_name, clone_url, local_path = clone_to_temp(payload.github_url)
+
+    repo_data = {
+        "user_id": current_user["_id"],
         "repo_name": repo_name,
         "github_url": clone_url,
         "local_path": str(local_path),
-        "user_id": str(current_user["_id"]),
+        "branch": "main",
+        "language": "Unknown",
+        "status": "indexing",
+        "indexed_at": datetime.utcnow(),
     }
+    repo_result = repositories.insert_one(repo_data)
+    repository_id = repo_result.inserted_id
+
+    try:
+        vector_result = save_repo_vectors(
+            repo_path=str(local_path),
+            user_id=str(current_user["_id"]),
+            repository_id=str(repository_id),
+        )
+        repositories.update_one(
+            {"_id": repository_id},
+            {"$set": {"status": "indexed", "indexed_at": datetime.utcnow()}},
+        )
+    except Exception as exc:
+        repositories.update_one(
+            {"_id": repository_id},
+            {"$set": {"status": "failed", "indexed_at": datetime.utcnow()}},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to index repository",
+        ) from exc
+
+    return {
+        "message": "Repository indexed successfully",
+        "repository_id": str(repository_id),
+        "repo_name": repo_name,
+        "github_url": clone_url,
+        "local_path": str(local_path),
+        "vectors_inserted": vector_result["inserted_count"],
+    }
+
+
