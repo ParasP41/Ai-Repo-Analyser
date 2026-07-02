@@ -81,6 +81,7 @@ def logout(response: Response):
     clear_auth_cookie(response)
     return {"message": "Logout successful"}
 
+
 def get_logged_in_user(current_user: dict):
     return {
         "user": user_response(current_user),

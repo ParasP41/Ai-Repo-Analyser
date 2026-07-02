@@ -9,11 +9,24 @@ if not MONGODB_URI:
 if not DATABASE_NAME:
     raise ValueError("DATABASE_NAME is not set")
 
-client = MongoClient(
-    MONGODB_URI,
-    tlsCAFile=certifi.where(),
-    serverSelectionTimeoutMS=10000,
-)
+
+def get_mongo_client():
+    # Atlas connection
+    if MONGODB_URI.startswith("mongodb+srv://"):
+        return MongoClient(
+            MONGODB_URI,
+            tlsCAFile=certifi.where(),
+            serverSelectionTimeoutMS=10000,
+        )
+
+    # Local MongoDB / Compass connection
+    return MongoClient(
+        MONGODB_URI,
+        serverSelectionTimeoutMS=10000,
+    )
+
+
+client = get_mongo_client()
 db = client[DATABASE_NAME]
 
 
