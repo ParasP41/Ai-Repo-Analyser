@@ -70,21 +70,46 @@ def get_retriever(repository_id: str, user_id: Optional[str] = None, k: int = 5)
     )
 
 
+def retrieve_chunks(
+    query: str,
+    repository_id: str,
+    top_k: int = 5,
+    user_id: Optional[str] = None,
+) -> list[dict]:
+    """
+    Shared retrieval function used by every agent.
+    Wraps MongoVectorRetriever and returns plain dicts
+    (content + metadata) instead of LangChain Document objects,
+    matching what each agent's context builder expects.
+    """
+    retriever = get_retriever(repository_id=repository_id, user_id=user_id, k=top_k)
+    documents = retriever.invoke(query)
+
+    return [
+        {
+            "content": doc.page_content,
+            "metadata": doc.metadata,
+            "score": doc.metadata.get("score"),
+        }
+        for doc in documents
+    ]
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 3:
         print("Usage: python src/rag/retriever.py <repository_id> <question> [k]")
         raise SystemExit(1)
 
-    retriever = get_retriever(
+    chunks = retrieve_chunks(
+        query=sys.argv[2],
         repository_id=sys.argv[1],
-        k=int(sys.argv[3]) if len(sys.argv) > 3 else 5,
+        top_k=int(sys.argv[3]) if len(sys.argv) > 3 else 5,
     )
-    documents = retriever.invoke(sys.argv[2])
 
-    for index, document in enumerate(documents, start=1):
+    for index, chunk in enumerate(chunks, start=1):
         print("\n" + "=" * 80)
         print(f"Result {index}")
-        print("Score:", document.metadata.get("score"))
-        print("Metadata:", document.metadata)
+        print("Score:", chunk["score"])
+        print("Metadata:", chunk["metadata"])
         print("Content:")
-        print(document.page_content)
+        print(chunk["content"])
